@@ -1,0 +1,24 @@
+services:
+  worker:
+    build:
+      context: ./services/worker
+    environment:
+      VIDEO_API_BASE_URL: ${VIDEO_API_BASE_URL:-https://api.jusuanhub.com:10443}
+      VIDEO_API_SUBMIT_PATH: ${VIDEO_API_SUBMIT_PATH:-/v1/media/generations}
+      VIDEO_API_STATUS_PATH_TEMPLATE: ${VIDEO_API_STATUS_PATH_TEMPLATE:-/v1/media/generations/{id}}
+      VIDEO_API_KEY: ${VIDEO_API_KEY:?请在项目根目录 .env 中配置 VIDEO_API_KEY}
+      VIDEO_API_POLL_INTERVAL_SECONDS: ${VIDEO_API_POLL_INTERVAL_SECONDS:-3}
+      VIDEO_API_TIMEOUT_SECONDS: ${VIDEO_API_TIMEOUT_SECONDS:-900}
+    restart: unless-stopped
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    depends_on:
+      - worker
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - ./data:/data
+    restart: unless-stopped

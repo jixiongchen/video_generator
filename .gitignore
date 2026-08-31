@@ -1,0 +1,35 @@
+node_modules/
+dist/
+.pnpm-store/
+
+# Local secrets and environment overrides
+.env*
+!.env.example
+*.pem
+*.key
+
+# Generated application data and local toolchains
+data/
+data-*/
+.cache/
+.tools/
+
+# Python caches
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Test/build output and logs
+coverage/
+*.log
+*.tmp
+
+# Editors and operating systems
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+Desktop.ini
+*.swp

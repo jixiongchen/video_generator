@@ -1,0 +1,13 @@
+packages:
+  - apps/*
+
+onlyBuiltDependencies:
+  - esbuild
+allowBuilds:
+  esbuild: true
+
+supportedArchitectures:
+  os:
+    - win32
+  cpu:
+    - x64
