@@ -9,30 +9,31 @@ class SuccessfulProvider:
     def generate(
         self,
         payload: dict[str, Any],
-        update: Callable[[str, int, str, str, str], None],
+        update: Callable[[str, int, str, str, str, str], None],
         is_canceled: Callable[[], bool],
     ) -> None:
         if not is_canceled():
             update(
                 "succeeded",
                 100,
-                "https://cdn.example.test/result.mp4",
+                "",
                 "provider-task-1",
+                "asset-1",
                 "",
             )
 
 
 class WorkerTests(unittest.TestCase):
     def test_job_completes_with_provider_result(self) -> None:
-        manager = JobManager(SuccessfulProvider())
+        manager = JobManager(SuccessfulProvider(), "http://127.0.0.1:8090")
         job = manager.create(
             {
-                "model": "mock-model",
+                "model": "minimax-h3",
                 "prompt": "test",
                 "generationMode": "t2v",
-                "resolutionTier": "480p",
-                "orientation": "landscape",
-                "seconds": 5,
+                "resolutionTier": "768p",
+                "orientation": "portrait",
+                "seconds": 15,
             }
         )
         deadline = time.monotonic() + 3
@@ -40,8 +41,10 @@ class WorkerTests(unittest.TestCase):
             current = manager.get(job.id)
             if current and current.status == "succeeded":
                 self.assertEqual(current.progress, 100)
+                self.assertEqual(current.assetId, "asset-1")
                 self.assertEqual(
-                    current.videoUrl, "https://cdn.example.test/result.mp4"
+                    current.videoUrl,
+                    f"http://127.0.0.1:8090/v1/jobs/{job.id}/video",
                 )
                 return
             time.sleep(0.05)

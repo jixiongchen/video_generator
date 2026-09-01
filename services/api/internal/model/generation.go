@@ -9,7 +9,6 @@ type GenerationRequest struct {
 	ResolutionTier string `json:"resolutionTier"`
 	Orientation    string `json:"orientation"`
 	Seconds        int    `json:"seconds"`
-	Seed           *int64 `json:"seed,omitempty"`
 }
 
 type Generation struct {

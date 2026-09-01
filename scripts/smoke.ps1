@@ -1,6 +1,6 @@
 param(
   [string]$ApiBaseUrl = "http://127.0.0.1:8080",
-  [Parameter(Mandatory = $true)][string]$Model,
+  [string]$Model = "minimax-h3",
   [int]$TimeoutSeconds = 900
 )
 
@@ -10,10 +10,9 @@ $body = @{
   model = $Model
   prompt = "生成一个红色的奥迪R8跑车，在山地公路上飙车的激情视频。"
   generationMode = "t2v"
-  resolutionTier = "480p"
-  orientation = "landscape"
-  seconds = 5
-  seed = 42
+  resolutionTier = "768p"
+  orientation = "portrait"
+  seconds = 15
 } | ConvertTo-Json
 
 $task = Invoke-RestMethod `

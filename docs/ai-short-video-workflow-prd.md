@@ -443,45 +443,52 @@ orderedInputArtifactHashes
 
 ### 14.1 当前接入
 
-基础地址：`https://api.jusuanhub.com:10443/v1`
+基础地址：`https://api.jusuanhub.com:10443`
 
 创建任务：
 
 ```http
-POST /media/generations
+POST /v1/media/generations
 Authorization: Bearer <API_KEY>
+Idempotency-Key: <UUID>
 Content-Type: application/json
 ```
 
 ```json
 {
-  "model": "<MODEL_ALIAS>",
+  "model": "minimax-h3",
   "prompt": "生成一个红色的奥迪R8跑车，在山地公路上飙车的激情视频。",
   "generationMode": "t2v",
-  "resolutionTier": "480p",
-  "orientation": "landscape",
-  "seconds": 5,
-  "seed": 42
+  "resolutionTier": "768p",
+  "orientation": "portrait",
+  "seconds": 15
 }
 ```
 
-状态查询在真实冒烟前需由接口提供方确认。当前适配器默认采用通用形式：
+创建响应返回 `jobId`。Worker 使用相同模型 ID 轮询任务：
 
 ```http
-GET /media/generations/{task_id}
+GET /v1/jobs/{job_id}?model={model}
 Authorization: Bearer <API_KEY>
 ```
 
-该路径通过 `VIDEO_API_STATUS_PATH_TEMPLATE` 配置，不写死在业务节点中。
+任务成功后读取 `assets[0].assetId`，再下载视频内容：
+
+```http
+GET /v1/assets/{asset_id}/content?model={model}
+Authorization: Bearer <API_KEY>
+```
+
+两条路径分别通过 `VIDEO_API_JOB_PATH_TEMPLATE` 与 `VIDEO_API_ASSET_PATH_TEMPLATE` 配置，不写死在业务节点中。
 
 ### 14.2 响应归一化
 
 Worker 兼容以下常见字段：
 
-- 任务 ID：`id`、`task_id`、`request_id`。
+- 任务 ID：优先读取 `jobId`，并兼容 `job_id`、`id`、`task_id`、`request_id`。
 - 状态：`status`、`task_status`、`state`。
 - 进度：`progress`，允许 `0–1` 或 `0–100`。
-- 视频地址：`video_url`、`content_url`、`url`，以及 `content/output/data/results` 嵌套结构。
+- 成片资源：优先读取 `assets[].assetId`，并兼容供应商直接返回的视频 URL。
 
 归一化状态必须输出平台状态，供应商原始状态可以作为调试元数据保存，但不得直接驱动前端业务逻辑。
 

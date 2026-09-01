@@ -6,10 +6,9 @@ const initialForm: GenerationRequest = {
   model: "minimax-h3",
   prompt: "生成一个红色的奥迪R8跑车，在山地公路上飙车的激情视频。",
   generationMode: "t2v",
-  resolutionTier: "480p",
-  orientation: "landscape",
-  seconds: 5,
-  seed: 42
+  resolutionTier: "768p",
+  orientation: "portrait",
+  seconds: 15
 };
 
 const statusLabels: Record<Generation["status"], string> = {
@@ -151,6 +150,7 @@ export default function App() {
               >
                 <option value="480p">480p</option>
                 <option value="720p">720p</option>
+                <option value="768p">768p</option>
                 <option value="1080p">1080p</option>
               </select>
             </label>
@@ -175,25 +175,13 @@ export default function App() {
               <select
                 value={form.seconds}
                 onChange={(event) =>
-                  setForm({ ...form, seconds: Number(event.target.value) as 5 | 10 })
+                  setForm({ ...form, seconds: Number(event.target.value) as 5 | 10 | 15 })
                 }
               >
                 <option value={5}>5 秒</option>
                 <option value={10}>10 秒</option>
+                <option value={15}>15 秒</option>
               </select>
-            </label>
-            <label>
-              <span>随机种子</span>
-              <input
-                type="number"
-                value={form.seed ?? ""}
-                onChange={(event) =>
-                  setForm({
-                    ...form,
-                    seed: event.target.value === "" ? undefined : Number(event.target.value)
-                  })
-                }
-              />
             </label>
           </div>
 

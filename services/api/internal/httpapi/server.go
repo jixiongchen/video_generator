@@ -70,15 +70,15 @@ func (s *Server) config(w http.ResponseWriter, _ *http.Request) {
 		"defaults": map[string]any{
 			"model":          "minimax-h3",
 			"generationMode": "t2v",
-			"resolutionTier": "480p",
-			"orientation":    "landscape",
-			"seconds":        5,
+			"resolutionTier": "768p",
+			"orientation":    "portrait",
+			"seconds":        15,
 		},
 		"capabilities": map[string]any{
 			"generationModes": []string{"t2v"},
-			"resolutions":     []string{"480p", "720p", "1080p"},
+			"resolutions":     []string{"480p", "720p", "768p", "1080p"},
 			"orientations":    []string{"landscape", "portrait", "square"},
-			"seconds":         []int{5, 10},
+			"seconds":         []int{5, 10, 15},
 		},
 	})
 }
@@ -336,14 +336,14 @@ func validate(input model.GenerationRequest) error {
 	if input.GenerationMode != "t2v" {
 		return errors.New("首版仅支持 t2v")
 	}
-	if !oneOf(input.ResolutionTier, "480p", "720p", "1080p") {
+	if !oneOf(input.ResolutionTier, "480p", "720p", "768p", "1080p") {
 		return errors.New("resolutionTier 不受支持")
 	}
 	if !oneOf(input.Orientation, "landscape", "portrait", "square") {
 		return errors.New("orientation 不受支持")
 	}
-	if input.Seconds != 5 && input.Seconds != 10 {
-		return errors.New("seconds 首版仅支持 5 或 10")
+	if input.Seconds != 5 && input.Seconds != 10 && input.Seconds != 15 {
+		return errors.New("seconds 首版仅支持 5、10 或 15")
 	}
 	return nil
 }

@@ -29,6 +29,20 @@ func TestRejectsInvalidGeneration(t *testing.T) {
 	}
 }
 
+func TestAcceptsDocumentedMinimaxParameters(t *testing.T) {
+	input := model.GenerationRequest{
+		Model:          "minimax-h3",
+		Prompt:         "test",
+		GenerationMode: "t2v",
+		ResolutionTier: "768p",
+		Orientation:    "portrait",
+		Seconds:        15,
+	}
+	if err := validate(input); err != nil {
+		t.Fatalf("expected request to be valid, got %v", err)
+	}
+}
+
 func TestGenerationVideoProxiesRangeAndDownload(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.Header.Get("Range"); got != "bytes=0-3" {

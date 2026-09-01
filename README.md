@@ -4,10 +4,10 @@
 
 ## 已实现
 
-- 文生视频参数表单：模型别名、提示词、分辨率、方向、时长、随机种子。
+- 文生视频参数表单：模型别名、提示词、分辨率、方向和时长。
 - Go REST API、本地 JSON 持久化、任务查询、取消和 SSE 事件流。
-- Python 异步 Worker、JusuanHub Bearer Token 调用、供应商状态归一化和结果 URL 提取。
-- 聚合视频接口：`POST /v1/media/generations`，状态查询默认使用 `GET /v1/media/generations/{task_id}`。
+- Python 异步 Worker、JusuanHub Bearer Token 调用、幂等提交、状态轮询和资源下载代理。
+- 聚合视频接口：`POST /v1/media/generations`，随后轮询 `GET /v1/jobs/{job_id}?model={model}`，再通过 `GET /v1/assets/{asset_id}/content?model={model}` 读取成片。
 - React 最小操作页、任务记录、成片预览和下载。
 - Docker Compose 单机运行配置。
 - Go/Python 单元测试和 Mock 端到端冒烟脚本。
@@ -60,13 +60,14 @@ pnpm --dir apps\web run dev
 ```dotenv
 VIDEO_API_BASE_URL=https://api.jusuanhub.com:10443
 VIDEO_API_SUBMIT_PATH=/v1/media/generations
-VIDEO_API_STATUS_PATH_TEMPLATE=/v1/media/generations/{id}
+VIDEO_API_JOB_PATH_TEMPLATE=/v1/jobs/{id}?model={model}
+VIDEO_API_ASSET_PATH_TEMPLATE=/v1/assets/{asset_id}/content?model={model}
 VIDEO_API_KEY=在这里填写你的Key
 ```
 
 `.\scripts\start-worker.ps1` 会把 `.env` 内容载入 Worker 进程环境。`VIDEO_API_KEY` 只进入 Python Worker，不会出现在前端响应、Go 数据文件或正常日志中。页面的“模型别名”必须填写供应商实际支持的模型别名。
 
-当前根据提交接口约定，异步状态查询默认使用 `GET /v1/media/generations/{id}`。如果供应商返回的实际查询路径不同，只需修改 `.env` 中的 `VIDEO_API_STATUS_PATH_TEMPLATE` 后重启 Worker。
+供应商偶发返回 429 或 5xx 时，提交阶段会使用同一个 `Idempotency-Key` 最多尝试三次，避免重复创建付费任务。
 
 ## 视频供应商适配约定
 
@@ -74,17 +75,16 @@ VIDEO_API_KEY=在这里填写你的Key
 
 ```json
 {
-  "model": "<MODEL_ALIAS>",
+  "model": "minimax-h3",
   "prompt": "生成一个红色的奥迪R8跑车，在山地公路上飙车的激情视频。",
   "generationMode": "t2v",
-  "resolutionTier": "480p",
-  "orientation": "landscape",
-  "seconds": 5,
-  "seed": 42
+  "resolutionTier": "768p",
+  "orientation": "portrait",
+  "seconds": 15
 }
 ```
 
-Worker 会兼容常见的 `id/task_id/request_id`、`status/task_status/state`、`url/video_url/content_url` 及嵌套 `content/output/data/results` 响应。如果真实响应字段不同，应先补充 `services/worker/worker/provider.py` 的归一化测试，再调整适配逻辑。
+Worker 会读取提交响应中的 `jobId`，任务成功后读取 `assets[0].assetId`。视频下载仍经过 Go 和 Python 后端代理，因此供应商 Key 不会暴露给浏览器。
 
 ## 测试
 
@@ -95,7 +95,7 @@ Worker 会兼容常见的 `id/task_id/request_id`、`status/task_status/state`�
 服务运行且已配置 Key 后，可执行真实端到端冒烟。该命令会产生一次实际生成费用：
 
 ```powershell
-.\scripts\smoke.ps1 -Model "供应商模型别名" -TimeoutSeconds 900
+.\scripts\smoke.ps1 -TimeoutSeconds 900
 ```
 
 ## 项目结构

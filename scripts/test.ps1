@@ -7,10 +7,13 @@ if (-not $python) {
 }
 
 $go = Get-Command go -ErrorAction SilentlyContinue
-if (-not $go) {
+$goExecutable = $null
+if ($go) {
+  $goExecutable = $go.Source
+} else {
   $localGo = Join-Path $root ".tools\go\bin\go.exe"
   if (Test-Path -LiteralPath $localGo) {
-    $go = Get-Item $localGo
+    $goExecutable = (Resolve-Path -LiteralPath $localGo).Path
   } else {
     throw "Go was not found on PATH or in .tools/go. Go 1.23+ is required."
   }
@@ -23,10 +26,9 @@ $env:GOCACHE = Join-Path $root ".cache\go-build"
 $env:GOPATH = Join-Path $root ".cache\gopath"
 Push-Location (Join-Path $root "services\api")
 try {
-  & $go.Source test ./...
+  & $goExecutable test ./...
 } finally {
   Pop-Location
 }
 
 pnpm --dir (Join-Path $root "apps\web") run build
-

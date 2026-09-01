@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import threading
 import time
 import uuid
@@ -22,6 +23,7 @@ class Job:
     progress: int = 0
     videoUrl: str = ""
     providerId: str = ""
+    assetId: str = ""
     error: str = ""
     createdAt: float = field(default_factory=time.time)
     updatedAt: float = field(default_factory=time.time)
@@ -35,8 +37,9 @@ class Job:
 
 
 class JobManager:
-    def __init__(self, provider: VideoProvider):
+    def __init__(self, provider: VideoProvider, public_base_url: str):
         self.provider = provider
+        self.public_base_url = public_base_url.rstrip("/")
         self._jobs: dict[str, Job] = {}
         self._lock = threading.RLock()
 
@@ -74,15 +77,21 @@ class JobManager:
 
             self.provider.generate(
                 self._jobs[job_id].request,
-                lambda status, progress, video_url, provider_id, error: self._update(
-                    job_id, status, progress, video_url, provider_id, error
+                lambda status, progress, video_url, provider_id, asset_id, error: self._update(
+                    job_id,
+                    status,
+                    progress,
+                    video_url,
+                    provider_id,
+                    asset_id,
+                    error,
                 ),
                 lambda: self._is_canceled(job_id),
             )
         except ProviderError as exc:
-            self._update(job_id, "failed", 0, "", "", str(exc))
+            self._update(job_id, "failed", 0, "", "", "", str(exc))
         except Exception as exc:  # Keep worker process alive; never expose tracebacks/API keys.
-            self._update(job_id, "failed", 0, "", "", f"Worker 内部错误: {exc}")
+            self._update(job_id, "failed", 0, "", "", "", f"Worker 内部错误: {exc}")
 
     def _update(
         self,
@@ -91,6 +100,7 @@ class JobManager:
         progress: int,
         video_url: str,
         provider_id: str,
+        asset_id: str,
         error: str,
     ) -> None:
         with self._lock:
@@ -98,9 +108,13 @@ class JobManager:
             if job.canceled:
                 return
             job.status = status
-            job.progress = progress
-            job.videoUrl = video_url
+            job.progress = 100 if status == "succeeded" else progress
             job.providerId = provider_id or job.providerId
+            if asset_id:
+                job.assetId = asset_id
+                job.videoUrl = f"{self.public_base_url}/v1/jobs/{job_id}/video"
+            elif video_url:
+                job.videoUrl = video_url
             job.error = error
             job.updatedAt = time.time()
 
@@ -140,6 +154,14 @@ class Handler(BaseHTTPRequestHandler):
                 },
             )
             return
+        if path.startswith("/v1/jobs/") and path.endswith("/video"):
+            job_id = path.removeprefix("/v1/jobs/").removesuffix("/video")
+            job = self.manager.get(job_id)
+            if job is None:
+                self._error(HTTPStatus.NOT_FOUND, "任务不存在")
+                return
+            self._stream_video(job)
+            return
         if path.startswith("/v1/jobs/"):
             job_id = path.removeprefix("/v1/jobs/").split("/", 1)[0]
             job = self.manager.get(job_id)
@@ -149,6 +171,39 @@ class Handler(BaseHTTPRequestHandler):
             self._json(HTTPStatus.OK, job.public())
             return
         self._error(HTTPStatus.NOT_FOUND, "路由不存在")
+
+    def _stream_video(self, job: Job) -> None:
+        if job.status != "succeeded" or not job.assetId:
+            self._error(HTTPStatus.CONFLICT, "视频资源尚未生成完成")
+            return
+        try:
+            response = self.manager.provider.open_asset(
+                job.assetId,
+                str(job.request["model"]),
+                self.headers.get("Range", ""),
+            )
+        except ProviderError as exc:
+            self._error(HTTPStatus.BAD_GATEWAY, str(exc))
+            return
+
+        with response:
+            status = getattr(response, "status", None) or response.getcode()
+            self.send_response(status)
+            for header in (
+                "Content-Type",
+                "Content-Length",
+                "Content-Range",
+                "Accept-Ranges",
+                "ETag",
+                "Last-Modified",
+            ):
+                value = response.headers.get(header)
+                if value:
+                    self.send_header(header, value)
+            if not response.headers.get("Content-Type"):
+                self.send_header("Content-Type", "video/mp4")
+            self.end_headers()
+            shutil.copyfileobj(response, self.wfile, length=1024 * 1024)
 
     def do_POST(self) -> None:  # noqa: N802
         path = urlparse(self.path).path
@@ -203,10 +258,11 @@ class Handler(BaseHTTPRequestHandler):
 
 def create_server(config: ProviderConfig | None = None) -> ThreadingHTTPServer:
     config = config or ProviderConfig.from_env()
-    Handler.config = config
-    Handler.manager = JobManager(VideoProvider(config))
     host = os.getenv("WORKER_ADDR", "127.0.0.1")
     port = int(os.getenv("WORKER_PORT", "8090"))
+    public_base_url = os.getenv("WORKER_PUBLIC_URL", f"http://127.0.0.1:{port}")
+    Handler.config = config
+    Handler.manager = JobManager(VideoProvider(config), public_base_url)
     return ThreadingHTTPServer((host, port), Handler)
 
 

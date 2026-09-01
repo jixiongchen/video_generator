@@ -12,10 +12,9 @@ export interface GenerationRequest {
   model: string;
   prompt: string;
   generationMode: "t2v";
-  resolutionTier: "480p" | "720p" | "1080p";
+  resolutionTier: "480p" | "720p" | "768p" | "1080p";
   orientation: "landscape" | "portrait" | "square";
-  seconds: 5 | 10;
-  seed?: number;
+  seconds: 5 | 10 | 15;
 }
 
 export interface Generation {
@@ -39,4 +38,3 @@ export interface AppConfig {
     seconds: GenerationRequest["seconds"][];
   };
 }
-
