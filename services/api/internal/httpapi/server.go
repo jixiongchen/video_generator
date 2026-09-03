@@ -32,7 +32,11 @@ type Server struct {
 	mux     *http.ServeMux
 }
 
-func New(s *store.Store, w *worker.Client, webDist string) *Server {
+// RouteRegistrar 是 Agent 与 HTTP 壳的最小接口。新 Agent 只需注册自己的路由，
+// Server 不需要导入每个具体业务包，也不需要知道它有哪些提示词或步骤。
+type RouteRegistrar interface{ Register(*http.ServeMux) }
+
+func New(s *store.Store, w *worker.Client, webDist string, agents ...RouteRegistrar) *Server {
 	server := &Server{
 		store:   s,
 		worker:  w,
@@ -41,6 +45,9 @@ func New(s *store.Store, w *worker.Client, webDist string) *Server {
 		mux:     http.NewServeMux(),
 	}
 	server.routes()
+	for _, agent := range agents {
+		agent.Register(server.mux)
+	}
 	return server
 }
 
@@ -474,9 +481,20 @@ func writeError(w http.ResponseWriter, status int, message string) {
 
 func withCORS(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "http://127.0.0.1:5173")
+		// 本机免登录不代表任意网页都可以发起付费任务。先拒绝外部 Origin，
+		// 而不只是设置 CORS 响应头（简单 POST 即使读不到响应，也可能已被执行）。
+		origin := r.Header.Get("Origin")
+		if origin != "" {
+			u, err := url.Parse(origin)
+			if err != nil || (u.Scheme != "http" && u.Scheme != "https") || (u.Hostname() != "localhost" && u.Hostname() != "127.0.0.1" && u.Hostname() != "::1") {
+				writeError(w, http.StatusForbidden, "仅允许本机页面访问本机 API")
+				return
+			}
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Add("Vary", "Origin")
+		}
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Last-Event-ID")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, OPTIONS")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
 			return

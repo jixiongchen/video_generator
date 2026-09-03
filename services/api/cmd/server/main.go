@@ -6,6 +6,8 @@ import (
 	"os"
 	"time"
 
+	"video-generator/services/api/internal/agents/core"
+	"video-generator/services/api/internal/agents/novel"
 	"video-generator/services/api/internal/httpapi"
 	"video-generator/services/api/internal/store"
 	"video-generator/services/api/internal/worker"
@@ -22,9 +24,15 @@ func main() {
 		slog.Error("initialize store", "error", err)
 		os.Exit(1)
 	}
+	// Agent 与视频复用服务端口，但使用独立的业务包、长请求客户端和存储目录。
+	novelAgent, err := novel.New(dataDir, core.NewWorker(workerURL))
+	if err != nil {
+		slog.Error("initialize novel agent", "error", err)
+		os.Exit(1)
+	}
 	server := &http.Server{
 		Addr:              addr,
-		Handler:           httpapi.New(s, worker.New(workerURL), webDist).Handler(),
+		Handler:           httpapi.New(s, worker.New(workerURL), webDist, novelAgent).Handler(),
 		ReadHeaderTimeout: 5 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}

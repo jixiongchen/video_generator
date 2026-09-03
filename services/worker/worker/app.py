@@ -13,6 +13,8 @@ from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 from .provider import ProviderConfig, ProviderError, VideoProvider
+from .agents.http import dispatch as dispatch_agent
+from .providers.text import TextConfig, TextProviderError
 
 
 @dataclass
@@ -144,6 +146,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:  # noqa: N802
         path = urlparse(self.path).path
+        if path == "/v1/agents/config":
+            self._json(HTTPStatus.OK, TextConfig.from_env().public())
+            return
         if path == "/healthz":
             self._json(
                 HTTPStatus.OK,
@@ -208,6 +213,19 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
         path = parsed.path
+        if path.startswith("/v1/agents/"):
+            try:
+                # 仅导入路由接受较大请求，普通 Agent 步骤保持 1 MiB 上限。
+                limit = (29 if path.endswith("/import") else 8 if path.endswith("/validate") else 1) * 1024 * 1024
+                result = dispatch_agent(path, self._read_json(limit))
+                self._json(HTTPStatus.OK, result)
+            except ValueError as exc:
+                self._error(HTTPStatus.UNPROCESSABLE_ENTITY, str(exc))
+            except TextProviderError as exc:
+                self._error(HTTPStatus.BAD_GATEWAY, str(exc))
+            except Exception:
+                self._error(HTTPStatus.INTERNAL_SERVER_ERROR, "Agent 内部错误；请检查配置或运行测试。")
+            return
         if path == "/v1/assets/input":
             model = parse_qs(parsed.query).get("model", [""])[0].strip()
             content_type = self.headers.get("Content-Type", "")
@@ -234,6 +252,9 @@ class Handler(BaseHTTPRequestHandler):
             self._json(HTTPStatus.CREATED, result)
             return
         if path == "/v1/jobs":
+            if not self.config.api_key:
+                self._error(HTTPStatus.SERVICE_UNAVAILABLE, "视频模型未配置 VIDEO_API_KEY；小说功能不受影响")
+                return
             try:
                 payload = self._read_json()
                 job = self.manager.create(payload)
@@ -252,12 +273,12 @@ class Handler(BaseHTTPRequestHandler):
             return
         self._error(HTTPStatus.NOT_FOUND, "路由不存在")
 
-    def _read_json(self) -> dict[str, Any]:
+    def _read_json(self, limit: int = 1024 * 1024) -> dict[str, Any]:
         try:
             length = int(self.headers.get("Content-Length", "0"))
         except ValueError as exc:
             raise ValueError("Content-Length 无效") from exc
-        if length <= 0 or length > 1024 * 1024:
+        if length <= 0 or length > limit:
             raise ValueError("请求体为空或过大")
         try:
             value = json.loads(self.rfile.read(length))
@@ -294,11 +315,7 @@ def create_server(config: ProviderConfig | None = None) -> ThreadingHTTPServer:
 
 def main() -> None:
     config = ProviderConfig.from_env()
-    if not config.api_key:
-        raise SystemExit(
-            "Worker 启动失败：缺少 VIDEO_API_KEY。"
-            "请在项目根目录 .env 中配置后重新启动。"
-        )
+    # 各功能在调用时检查自己的 Key；没有视频 Key 也能使用小说导入/文本 Agent。
     server = create_server(config)
     print(
         f"worker listening on http://{server.server_address[0]}:{server.server_address[1]} "

@@ -5,13 +5,12 @@ $envFile = Join-Path $projectRoot ".env"
 . (Join-Path $PSScriptRoot "import-env.ps1")
 
 if (-not (Test-Path -LiteralPath $envFile)) {
-  throw "Copy .env.example to .env and configure VIDEO_API_KEY first."
+  throw "Copy .env.example to .env, then configure the key for the feature you use."
 }
 Import-ProjectEnv -Path $envFile
 
-if ([string]::IsNullOrWhiteSpace($env:VIDEO_API_KEY)) {
-  throw "VIDEO_API_KEY is empty. Configure it in $envFile."
-}
+# Credentials are checked per feature inside the worker. Text-only projects do
+# not need VIDEO_API_KEY; importing a novel does not require either API key.
 
 $python = Get-Command python -ErrorAction SilentlyContinue
 if (-not $python) {
