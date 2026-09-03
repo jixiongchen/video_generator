@@ -131,6 +131,38 @@ class ProviderNormalizationTests(unittest.TestCase):
         )
         self.assertEqual(request.get_header("Authorization"), "Bearer secret-key")
 
+    @patch("worker.provider.urllib.request.urlopen")
+    def test_uploads_universal_reference_input(self, urlopen) -> None:
+        urlopen.return_value = JSONResponse({"asset": {"assetId": "asset-input"}})
+        provider = VideoProvider(
+            ProviderConfig(
+                base_url="https://api.example.test:10443",
+                submit_path="/v1/media/generations",
+                job_path_template="/v1/jobs/{id}?model={model}",
+                asset_path_template="/v1/assets/{asset_id}/content?model={model}",
+                api_key="secret-key",
+                poll_interval_seconds=0,
+                timeout_seconds=1,
+                request_timeout_seconds=300,
+            )
+        )
+
+        result = provider.upload_input(
+            "minimax-h3", "multipart/form-data; boundary=test", b"multipart-body"
+        )
+
+        request = urlopen.call_args.args[0]
+        self.assertEqual(
+            request.full_url,
+            "https://api.example.test:10443/v1/assets/input?model=minimax-h3",
+        )
+        self.assertEqual(request.get_header("Authorization"), "Bearer secret-key")
+        self.assertEqual(
+            request.get_header("Content-type"), "multipart/form-data; boundary=test"
+        )
+        self.assertEqual(request.data, b"multipart-body")
+        self.assertEqual(result, {"asset": {"assetId": "asset-input"}})
+
     @patch("worker.provider.time.sleep")
     @patch("worker.provider.urllib.request.urlopen")
     def test_submit_retries_503_with_same_idempotency_key(self, urlopen, _sleep) -> None:

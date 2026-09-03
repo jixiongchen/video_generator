@@ -169,6 +169,41 @@ textarea:focus {
   margin: 18px 0 22px;
 }
 
+.reference-upload-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  margin: 0 0 22px;
+}
+
+.upload-field {
+  align-content: start;
+  border: 1px dashed #31434a;
+  border-radius: 10px;
+  padding: 14px;
+}
+
+.upload-field input {
+  padding: 9px;
+}
+
+.upload-field small,
+.upload-note {
+  margin: 0;
+  color: #71858d;
+  line-height: 1.5;
+}
+
+.selected-files {
+  overflow-wrap: anywhere;
+  color: #57e4b3 !important;
+}
+
+.upload-note {
+  grid-column: 1 / -1;
+  font-size: 12px;
+}
+
 button {
   border: 0;
   cursor: pointer;
@@ -341,6 +376,10 @@ button:disabled {
 @media (max-width: 880px) {
   .form-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .reference-upload-grid {
+    grid-template-columns: 1fr;
   }
 
   .job-card {

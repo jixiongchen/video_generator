@@ -10,7 +10,7 @@ from dataclasses import asdict, dataclass, field
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 from .provider import ProviderConfig, ProviderError, VideoProvider
 
@@ -206,7 +206,33 @@ class Handler(BaseHTTPRequestHandler):
             shutil.copyfileobj(response, self.wfile, length=1024 * 1024)
 
     def do_POST(self) -> None:  # noqa: N802
-        path = urlparse(self.path).path
+        parsed = urlparse(self.path)
+        path = parsed.path
+        if path == "/v1/assets/input":
+            model = parse_qs(parsed.query).get("model", [""])[0].strip()
+            content_type = self.headers.get("Content-Type", "")
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+            except ValueError:
+                length = 0
+            if not model:
+                self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "model 不能为空")
+                return
+            if not content_type.startswith("multipart/form-data;"):
+                self._error(HTTPStatus.BAD_REQUEST, "上传请求必须使用 multipart/form-data")
+                return
+            if length <= 0 or length > 51 * 1024 * 1024:
+                self._error(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, "上传文件不能超过 50 MiB")
+                return
+            try:
+                result = self.manager.provider.upload_input(
+                    model, content_type, self.rfile.read(length)
+                )
+            except ProviderError as exc:
+                self._error(HTTPStatus.BAD_GATEWAY, str(exc))
+                return
+            self._json(HTTPStatus.CREATED, result)
+            return
         if path == "/v1/jobs":
             try:
                 payload = self._read_json()

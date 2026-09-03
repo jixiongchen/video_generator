@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -16,12 +18,14 @@ import (
 type Client struct {
 	baseURL string
 	http    *http.Client
+	upload  *http.Client
 }
 
 func New(baseURL string) *Client {
 	return &Client{
 		baseURL: strings.TrimRight(baseURL, "/"),
 		http:    &http.Client{Timeout: 15 * time.Second},
+		upload:  &http.Client{Timeout: 10 * time.Minute},
 	}
 }
 
@@ -35,6 +39,41 @@ func (c *Client) Get(ctx context.Context, id string) (model.WorkerJob, error) {
 
 func (c *Client) Cancel(ctx context.Context, id string) (model.WorkerJob, error) {
 	return c.do(ctx, http.MethodPost, "/v1/jobs/"+id+"/cancel", struct{}{})
+}
+
+func (c *Client) UploadInput(ctx context.Context, model, contentType string, contentLength int64, body io.Reader) (string, error) {
+	req, err := http.NewRequestWithContext(
+		ctx,
+		http.MethodPost,
+		c.baseURL+"/v1/assets/input?model="+url.QueryEscape(model),
+		body,
+	)
+	if err != nil {
+		return "", err
+	}
+	req.ContentLength = contentLength
+	req.Header.Set("Content-Type", contentType)
+	resp, err := c.upload.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		message, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return "", fmt.Errorf("worker returned %d: %s", resp.StatusCode, strings.TrimSpace(string(message)))
+	}
+	var result struct {
+		Asset struct {
+			AssetID string `json:"assetId"`
+		} `json:"asset"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", err
+	}
+	if result.Asset.AssetID == "" {
+		return "", errors.New("worker response did not include assetId")
+	}
+	return result.Asset.AssetID, nil
 }
 
 func (c *Client) do(ctx context.Context, method, path string, body any) (model.WorkerJob, error) {

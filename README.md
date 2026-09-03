@@ -1,10 +1,10 @@
 # AI 短视频工作流
 
-当前版本是“先跑通功能”的纵向切片：输入文生视频参数后，由 Go API 创建并持久化任务，Python Worker 调用 JusuanHub 视频接口，React 页面持续展示任务状态，并通过本机 Go 服务预览和下载成片。
+当前版本是“先跑通功能”的纵向切片：输入文生视频参数或上传全能参考素材后，由 Go API 创建并持久化任务，Python Worker 调用 JusuanHub 视频接口，React 页面持续展示任务状态，并通过本机 Go 服务预览和下载成片。
 
 ## 已实现
 
-- 文生视频参数表单：模型别名、提示词、分辨率、方向和时长。
+- 文生视频与 MiniMax H3 全能参考表单：支持图片、视频、音频上传。
 - Go REST API、本地 JSON 持久化、任务查询、取消和 SSE 事件流。
 - Python 异步 Worker、JusuanHub Bearer Token 调用、幂等提交、状态轮询和资源下载代理。
 - 聚合视频接口：`POST /v1/media/generations`，随后轮询 `GET /v1/jobs/{job_id}?model={model}`，再通过 `GET /v1/assets/{asset_id}/content?model={model}` 读取成片。
@@ -85,6 +85,8 @@ VIDEO_API_KEY=在这里填写你的Key
 ```
 
 Worker 会读取提交响应中的 `jobId`，任务成功后读取 `assets[0].assetId`。视频下载仍经过 Go 和 Python 后端代理，因此供应商 Key 不会暴露给浏览器。
+
+全能参考会先用通用 `file` 字段逐项上传到 `/v1/assets/input?model=minimax-h3`，再按图片、视频、音频顺序提交 `referenceInputs`。页面限制为最多 9 张图片、1 段视频、3 段音频，总数最多 12 项，且至少需要一项图片或视频。
 
 ## 测试
 

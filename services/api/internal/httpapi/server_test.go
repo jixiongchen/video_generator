@@ -3,6 +3,7 @@ package httpapi
 import (
 	"bytes"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -36,10 +37,65 @@ func TestAcceptsDocumentedMinimaxParameters(t *testing.T) {
 		GenerationMode: "t2v",
 		ResolutionTier: "768p",
 		Orientation:    "portrait",
-		Seconds:        15,
+		Seconds:        6,
 	}
 	if err := validate(input); err != nil {
 		t.Fatalf("expected request to be valid, got %v", err)
+	}
+}
+
+func TestValidatesUniversalReferenceInputs(t *testing.T) {
+	input := model.GenerationRequest{
+		Model:          "minimax-h3",
+		Prompt:         "参考主体和声音生成短片",
+		GenerationMode: "universal_reference_video",
+		ResolutionTier: "768p",
+		Orientation:    "portrait",
+		Seconds:        15,
+		ReferenceInputs: []model.ReferenceInput{
+			{Role: "reference_image", AssetID: "image-1", MediaType: "image"},
+			{Role: "reference_audio", AssetID: "audio-1", MediaType: "audio"},
+		},
+	}
+	if err := validate(input); err != nil {
+		t.Fatalf("expected universal reference request to be valid, got %v", err)
+	}
+	input.ReferenceInputs = input.ReferenceInputs[1:]
+	if err := validate(input); err == nil {
+		t.Fatal("expected audio-only universal reference request to be rejected")
+	}
+}
+
+func TestUploadInputProxiesMultipartToWorker(t *testing.T) {
+	workerServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/assets/input" || r.URL.Query().Get("model") != "minimax-h3" ||
+			!strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/form-data;") {
+			http.Error(w, "unexpected upload request", http.StatusBadRequest)
+			return
+		}
+		_, _ = io.Copy(io.Discard, r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"asset":{"assetId":"asset-input"}}`))
+	}))
+	defer workerServer.Close()
+
+	s, err := store.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var body bytes.Buffer
+	form := multipart.NewWriter(&body)
+	file, _ := form.CreateFormFile("file", "reference.png")
+	_, _ = file.Write([]byte("png"))
+	_ = form.Close()
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/assets/input?model=minimax-h3", &body)
+	req.Header.Set("Content-Type", form.FormDataContentType())
+	resp := httptest.NewRecorder()
+	New(s, worker.New(workerServer.URL), "").Handler().ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusCreated || !strings.Contains(resp.Body.String(), "asset-input") {
+		t.Fatalf("expected proxied asset, got %d: %s", resp.Code, resp.Body.String())
 	}
 }
 

@@ -3,12 +3,19 @@ package model
 import "time"
 
 type GenerationRequest struct {
-	Model          string `json:"model"`
-	Prompt         string `json:"prompt"`
-	GenerationMode string `json:"generationMode"`
-	ResolutionTier string `json:"resolutionTier"`
-	Orientation    string `json:"orientation"`
-	Seconds        int    `json:"seconds"`
+	Model           string           `json:"model"`
+	Prompt          string           `json:"prompt"`
+	GenerationMode  string           `json:"generationMode"`
+	ResolutionTier  string           `json:"resolutionTier"`
+	Orientation     string           `json:"orientation"`
+	Seconds         int              `json:"seconds"`
+	ReferenceInputs []ReferenceInput `json:"referenceInputs,omitempty"`
+}
+
+type ReferenceInput struct {
+	Role      string `json:"role"`
+	AssetID   string `json:"assetId"`
+	MediaType string `json:"mediaType"`
 }
 
 type Generation struct {

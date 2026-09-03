@@ -121,6 +121,22 @@ class VideoProvider:
                 return
         raise ProviderError("等待供应商生成结果超时")
 
+    def upload_input(
+        self, model: str, content_type: str, body: bytes
+    ) -> dict[str, Any]:
+        if not self.config.api_key:
+            raise ProviderError("缺少 VIDEO_API_KEY，请在项目根目录 .env 中配置")
+        response = self._request_json(
+            "POST",
+            "/v1/assets/input?model=" + urllib.parse.quote(model, safe=""),
+            body,
+            extra_headers={"Content-Type": content_type},
+        )
+        asset_id = extract_asset_id(response)
+        if not asset_id:
+            raise ProviderError("供应商上传响应中没有 assetId")
+        return {"asset": {"assetId": asset_id}}
+
     def open_asset(self, asset_id: str, model: str, range_header: str = ""):
         path = self.config.asset_path_template.format(
             asset_id=urllib.parse.quote(asset_id, safe=""),
@@ -146,7 +162,7 @@ class VideoProvider:
         self,
         method: str,
         path: str,
-        payload: dict[str, Any] | None = None,
+        payload: dict[str, Any] | bytes | None = None,
         extra_headers: dict[str, str] | None = None,
         retry_attempts: int = 1,
     ) -> dict[str, Any]:
@@ -187,11 +203,13 @@ class VideoProvider:
         self,
         method: str,
         path: str,
-        payload: dict[str, Any] | None = None,
+        payload: dict[str, Any] | bytes | None = None,
         extra_headers: dict[str, str] | None = None,
     ) -> urllib.request.Request:
         url = self.config.base_url + (path if path.startswith("/") else "/" + path)
-        body = None if payload is None else json.dumps(payload).encode("utf-8")
+        body = payload if isinstance(payload, bytes) else (
+            None if payload is None else json.dumps(payload).encode("utf-8")
+        )
         request = urllib.request.Request(url=url, data=body, method=method)
         request.add_header("Authorization", f"Bearer {self.config.api_key}")
         request.add_header("Content-Type", "application/json")

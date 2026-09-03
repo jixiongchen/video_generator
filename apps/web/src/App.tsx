@@ -1,6 +1,44 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "./api";
-import type { Generation, GenerationRequest } from "./types";
+import type { Generation, GenerationRequest, ReferenceInput } from "./types";
+
+const referenceFileGroups = [
+  {
+    key: "images",
+    label: "参考图片",
+    hint: "JPG / PNG / WebP，最多 9 张，每张 30 MiB",
+    accept: "image/jpeg,image/png,image/webp",
+    extensions: [".jpg", ".jpeg", ".png", ".webp"],
+    maxCount: 9,
+    maxBytes: 30 * 1024 * 1024,
+    role: "reference_image",
+    mediaType: "image"
+  },
+  {
+    key: "videos",
+    label: "参考视频",
+    hint: "MP4，最多 1 段，50 MiB",
+    accept: "video/mp4",
+    extensions: [".mp4"],
+    maxCount: 1,
+    maxBytes: 50 * 1024 * 1024,
+    role: "reference_video",
+    mediaType: "video"
+  },
+  {
+    key: "audios",
+    label: "参考音频",
+    hint: "WAV / MP3 / FLAC / M4A / AAC / OGG，最多 3 段，每段 15 MiB",
+    accept: ".wav,.mp3,.flac,.m4a,.aac,.ogg",
+    extensions: [".wav", ".mp3", ".flac", ".m4a", ".aac", ".ogg"],
+    maxCount: 3,
+    maxBytes: 15 * 1024 * 1024,
+    role: "reference_audio",
+    mediaType: "audio"
+  }
+] as const;
+
+type ReferenceFiles = Record<(typeof referenceFileGroups)[number]["key"], File[]>;
 
 const initialForm: GenerationRequest = {
   model: "minimax-h3",
@@ -29,6 +67,11 @@ export default function App() {
   const [form, setForm] = useState<GenerationRequest>(initialForm);
   const [items, setItems] = useState<Generation[]>([]);
   const [selectedGenerationId, setSelectedGenerationId] = useState("");
+  const [referenceFiles, setReferenceFiles] = useState<ReferenceFiles>({
+    images: [],
+    videos: [],
+    audios: []
+  });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
 
@@ -75,7 +118,36 @@ export default function App() {
     setSubmitting(true);
     setError("");
     try {
-      const created = await api.createGeneration(form);
+      let input: GenerationRequest = { ...form, referenceInputs: undefined };
+      if (form.generationMode === "universal_reference_video") {
+        const selectedFiles = referenceFileGroups.flatMap((group) =>
+          referenceFiles[group.key].map((file) => ({ file, group }))
+        );
+        if (referenceFiles.images.length + referenceFiles.videos.length === 0) {
+          throw new Error("全能参考至少需要 1 张图片或 1 段视频");
+        }
+        if (selectedFiles.length > 12) throw new Error("全能参考素材总数不能超过 12 项");
+
+        for (const { file, group } of selectedFiles) {
+          if (!group.extensions.some((extension) => file.name.toLowerCase().endsWith(extension))) {
+            throw new Error(`${file.name} 的文件格式不受支持`);
+          }
+          if (file.size > group.maxBytes) {
+            throw new Error(`${file.name} 超过单个文件大小限制`);
+          }
+        }
+        const referenceInputs: ReferenceInput[] = [];
+        for (const { file, group } of selectedFiles) {
+          referenceInputs.push({
+            role: group.role,
+            mediaType: group.mediaType,
+            assetId: await api.uploadInput(file, form.model)
+          });
+        }
+        input = { ...form, referenceInputs };
+      }
+
+      const created = await api.createGeneration(input);
       setItems((current) => [created, ...current]);
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "创建任务失败");
@@ -110,7 +182,7 @@ export default function App() {
         <div className="section-heading">
           <div>
             <span>01</span>
-            <h2>提交文生视频任务</h2>
+            <h2>提交视频生成任务</h2>
           </div>
           <p>API Key 仅由本机 Worker 环境变量读取，不会进入浏览器。</p>
         </div>
@@ -120,7 +192,7 @@ export default function App() {
             <span>提示词</span>
             <textarea
               value={form.prompt}
-              maxLength={2000}
+              maxLength={7000}
               rows={4}
               onChange={(event) => setForm({ ...form, prompt: event.target.value })}
               placeholder="描述画面、主体、动作、镜头与光线"
@@ -138,9 +210,32 @@ export default function App() {
               />
             </label>
             <label>
+              <span>创作模式</span>
+              <select
+                value={form.generationMode}
+                onChange={(event) => {
+                  const generationMode = event.target.value as GenerationRequest["generationMode"];
+                  setForm({
+                    ...form,
+                    generationMode,
+                    ...(generationMode === "universal_reference_video"
+                      ? {
+                          resolutionTier: "768p" as const,
+                          orientation: form.orientation === "square" ? ("portrait" as const) : form.orientation
+                        }
+                      : {})
+                  });
+                }}
+              >
+                <option value="t2v">文生视频</option>
+                <option value="universal_reference_video">全能参考</option>
+              </select>
+            </label>
+            <label>
               <span>分辨率</span>
               <select
                 value={form.resolutionTier}
+                disabled={form.generationMode === "universal_reference_video"}
                 onChange={(event) =>
                   setForm({
                     ...form,
@@ -167,26 +262,67 @@ export default function App() {
               >
                 <option value="landscape">横屏 16:9</option>
                 <option value="portrait">竖屏 9:16</option>
-                <option value="square">方形 1:1</option>
+                {form.generationMode === "t2v" && <option value="square">方形 1:1</option>}
               </select>
             </label>
             <label>
               <span>时长</span>
-              <select
+              <input
+                type="number"
+                min={5}
+                max={15}
+                step={1}
                 value={form.seconds}
                 onChange={(event) =>
-                  setForm({ ...form, seconds: Number(event.target.value) as 5 | 10 | 15 })
+                  setForm({ ...form, seconds: Number(event.target.value) })
                 }
-              >
-                <option value={5}>5 秒</option>
-                <option value={10}>10 秒</option>
-                <option value={15}>15 秒</option>
-              </select>
+                required
+              />
             </label>
           </div>
 
+          <div className="reference-upload-grid">
+            <p className="upload-note">全能参考素材：选择文件后自动切换到全能参考模式。</p>
+            {referenceFileGroups.map((group) => (
+              <label className="upload-field" key={group.key}>
+                <span>{group.label}</span>
+                <input
+                  type="file"
+                  accept={group.accept}
+                  multiple={group.maxCount > 1}
+                  onChange={(event) => {
+                    const files = Array.from(event.target.files ?? []);
+                    if (files.length > group.maxCount) {
+                      setError(`${group.label}最多选择 ${group.maxCount} 项`);
+                      setReferenceFiles((current) => ({ ...current, [group.key]: [] }));
+                      event.target.value = "";
+                      return;
+                    }
+                    setError("");
+                    setReferenceFiles((current) => ({ ...current, [group.key]: files }));
+                    if (files.length > 0) {
+                      setForm((current) => ({
+                        ...current,
+                        generationMode: "universal_reference_video",
+                        resolutionTier: "768p",
+                        orientation: current.orientation === "square" ? "portrait" : current.orientation
+                      }));
+                    }
+                  }}
+                />
+                <small>{group.hint}</small>
+                {referenceFiles[group.key].length > 0 && (
+                  <small className="selected-files">
+                    {referenceFiles[group.key].map((file) => file.name).join("、")}
+                  </small>
+                )}
+              </label>
+            ))}
+            <p className="upload-note">总数最多 12 项；不能只上传音频。素材将在提交时逐个上传。</p>
+          </div>
+
           <button className="primary-button" type="submit" disabled={submitting}>
-            {submitting ? "正在提交…" : "开始生成"}
+            {submitting ? "正在上传并提交…" : "开始生成"}
           </button>
         </form>
       </section>

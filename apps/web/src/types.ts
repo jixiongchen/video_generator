@@ -11,10 +11,17 @@ export type GenerationStatus =
 export interface GenerationRequest {
   model: string;
   prompt: string;
-  generationMode: "t2v";
+  generationMode: "t2v" | "universal_reference_video";
   resolutionTier: "480p" | "720p" | "768p" | "1080p";
   orientation: "landscape" | "portrait" | "square";
-  seconds: 5 | 10 | 15;
+  seconds: number;
+  referenceInputs?: ReferenceInput[];
+}
+
+export interface ReferenceInput {
+  role: "reference_image" | "reference_video" | "reference_audio";
+  assetId: string;
+  mediaType: "image" | "video" | "audio";
 }
 
 export interface Generation {

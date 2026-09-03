@@ -53,6 +53,7 @@ func (s *Server) routes() {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
 	s.mux.HandleFunc("GET /api/v1/config", s.config)
+	s.mux.HandleFunc("POST /api/v1/assets/input", s.uploadInput)
 	s.mux.HandleFunc("POST /api/v1/generations", s.createGeneration)
 	s.mux.HandleFunc("GET /api/v1/generations", s.listGenerations)
 	s.mux.HandleFunc("GET /api/v1/generations/{id}", s.getGeneration)
@@ -75,12 +76,38 @@ func (s *Server) config(w http.ResponseWriter, _ *http.Request) {
 			"seconds":        15,
 		},
 		"capabilities": map[string]any{
-			"generationModes": []string{"t2v"},
+			"generationModes": []string{"t2v", "universal_reference_video"},
 			"resolutions":     []string{"480p", "720p", "768p", "1080p"},
 			"orientations":    []string{"landscape", "portrait", "square"},
-			"seconds":         []int{5, 10, 15},
+			"seconds":         []int{5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15},
 		},
 	})
+}
+
+func (s *Server) uploadInput(w http.ResponseWriter, r *http.Request) {
+	modelAlias := strings.TrimSpace(r.URL.Query().Get("model"))
+	if modelAlias == "" {
+		writeError(w, http.StatusUnprocessableEntity, "model 不能为空")
+		return
+	}
+	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	if err != nil || mediaType != "multipart/form-data" {
+		writeError(w, http.StatusBadRequest, "上传请求必须使用 multipart/form-data")
+		return
+	}
+	if r.ContentLength <= 0 || r.ContentLength > 51<<20 {
+		writeError(w, http.StatusRequestEntityTooLarge, "上传文件不能超过 50 MiB")
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 51<<20)
+	assetID, err := s.worker.UploadInput(
+		r.Context(), modelAlias, r.Header.Get("Content-Type"), r.ContentLength, r.Body,
+	)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "上传输入素材失败: "+err.Error())
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{"asset": map[string]string{"assetId": assetID}})
 }
 
 func (s *Server) createGeneration(w http.ResponseWriter, r *http.Request) {
@@ -330,11 +357,11 @@ func validate(input model.GenerationRequest) error {
 	if strings.TrimSpace(input.Prompt) == "" {
 		return errors.New("prompt 不能为空")
 	}
-	if len([]rune(input.Prompt)) > 2000 {
-		return errors.New("prompt 不能超过 2000 个字符")
+	if len([]rune(input.Prompt)) > 7000 {
+		return errors.New("prompt 不能超过 7000 个字符")
 	}
-	if input.GenerationMode != "t2v" {
-		return errors.New("首版仅支持 t2v")
+	if !oneOf(input.GenerationMode, "t2v", "universal_reference_video") {
+		return errors.New("generationMode 不受支持")
 	}
 	if !oneOf(input.ResolutionTier, "480p", "720p", "768p", "1080p") {
 		return errors.New("resolutionTier 不受支持")
@@ -342,8 +369,46 @@ func validate(input model.GenerationRequest) error {
 	if !oneOf(input.Orientation, "landscape", "portrait", "square") {
 		return errors.New("orientation 不受支持")
 	}
-	if input.Seconds != 5 && input.Seconds != 10 && input.Seconds != 15 {
-		return errors.New("seconds 首版仅支持 5、10 或 15")
+	if input.Seconds < 5 || input.Seconds > 15 {
+		return errors.New("seconds 仅支持 5 到 15 的整数")
+	}
+	if input.GenerationMode == "t2v" {
+		if len(input.ReferenceInputs) != 0 {
+			return errors.New("t2v 不接受参考素材")
+		}
+		return nil
+	}
+	if input.ResolutionTier != "768p" || !oneOf(input.Orientation, "landscape", "portrait") {
+		return errors.New("全能参考仅支持 768p 横屏或竖屏")
+	}
+	if len(input.ReferenceInputs) == 0 || len(input.ReferenceInputs) > 12 {
+		return errors.New("全能参考素材总数必须为 1 到 12")
+	}
+	counts := map[string]int{}
+	seen := map[string]bool{}
+	mediaOrder := map[string]int{"image": 1, "video": 2, "audio": 3}
+	lastMediaOrder := 0
+	for _, reference := range input.ReferenceInputs {
+		if strings.TrimSpace(reference.AssetID) == "" || seen[reference.AssetID] {
+			return errors.New("全能参考素材 assetId 不能为空或重复")
+		}
+		seen[reference.AssetID] = true
+		expectedMediaType := strings.TrimPrefix(reference.Role, "reference_")
+		if !oneOf(reference.Role, "reference_image", "reference_video", "reference_audio") || reference.MediaType != expectedMediaType {
+			return errors.New("全能参考素材 role 与 mediaType 不匹配")
+		}
+		order := mediaOrder[reference.MediaType]
+		if order < lastMediaOrder {
+			return errors.New("全能参考素材必须按图片、视频、音频排序")
+		}
+		lastMediaOrder = order
+		counts[reference.MediaType]++
+	}
+	if counts["image"] > 9 || counts["video"] > 1 || counts["audio"] > 3 {
+		return errors.New("全能参考最多支持 9 张图片、1 段视频和 3 段音频")
+	}
+	if counts["image"]+counts["video"] == 0 {
+		return errors.New("全能参考至少需要 1 张图片或 1 段视频")
 	}
 	return nil
 }
